@@ -1,0 +1,89 @@
+name: Deploy to EC2
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Prepare app directory
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_KEY }}
+          script: |
+            set -e
+
+            APP_DIR="$HOME/ai"
+            REPO_URL="https://github.com/${{ github.repository }}.git"
+
+            mkdir -p "$APP_DIR"
+
+            if [ ! -d "$APP_DIR/.git" ]; then
+              git clone "$REPO_URL" "$APP_DIR"
+            fi
+
+      - name: Update source
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_KEY }}
+          script: |
+            set -e
+
+            APP_DIR="$HOME/ai"
+            cd "$APP_DIR"
+
+            git fetch origin main
+            git reset --hard origin/main
+
+      - name: Prepare environment file
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_KEY }}
+          script: |
+            set -e
+
+            APP_DIR="$HOME/ai"
+            cd "$APP_DIR"
+
+            if [ ! -f .env ]; then
+              cp .env.example .env
+            fi
+
+      - name: Build application
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_KEY }}
+          script: |
+            set -e
+
+            APP_DIR="$HOME/ai"
+            cd "$APP_DIR"
+
+            docker network create hyeyum-network >/dev/null 2>&1 || true
+            docker compose build
+
+      - name: Deploy container
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_KEY }}
+          script: |
+            set -e
+
+            APP_DIR="$HOME/ai"
+            cd "$APP_DIR"
+
+            docker compose up -d
