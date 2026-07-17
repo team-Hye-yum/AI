@@ -12,8 +12,12 @@ services:
       APP_NAME: ${APP_NAME:-hyeyum-ai}
       APP_ENV: ${APP_ENV:-prod}
       ROOT_PATH: ${ROOT_PATH:-/ai}
+      UPLOAD_DIR: ${UPLOAD_DIR:-uploads}
+      MAX_UPLOAD_FILE_SIZE_MB: ${MAX_UPLOAD_FILE_SIZE_MB:-100}
       WEAVIATE_URL: ${WEAVIATE_URL:-http://weaviate:8080}
       WEAVIATE_GRPC_HOST: ${WEAVIATE_GRPC_HOST:-weaviate:50051}
+    volumes:
+      - ./uploads:/app/uploads
     networks:
       - hyeyum-network
     restart: unless-stopped
