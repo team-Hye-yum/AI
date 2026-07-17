@@ -9,10 +9,11 @@ from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, sta
 from pydantic import BaseModel
 
 from app.core.config import settings
+from app.services.weaviate_ingest import WeaviateIngestError, ingest_training_file
 
 router = APIRouter()
 
-DatasetType = Literal["equipment", "notice"]
+DatasetType = Literal["equipment", "notice", "ksic"]
 
 CHUNK_SIZE = 1024 * 1024
 ALLOWED_SUFFIXES = {".txt"}
@@ -27,6 +28,9 @@ class TrainingDataUploadResponse(BaseModel):
     size_bytes: int
     sha256: str
     uploaded_at: datetime
+    weaviate_enabled: bool
+    weaviate_collection: str
+    weaviate_object_count: int
 
 
 class UploadedTrainingDataItem(BaseModel):
@@ -163,6 +167,20 @@ async def upload_training_data(
     finally:
         await file.close()
 
+    try:
+        weaviate_result = ingest_training_file(
+            dataset_type=dataset_type,
+            path=target_path,
+            original_filename=file.filename or safe_name,
+            sha256=digest.hexdigest(),
+            uploaded_at=uploaded_at,
+        )
+    except WeaviateIngestError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"failed to ingest into weaviate: {exc}",
+        ) from exc
+
     return TrainingDataUploadResponse(
         dataset_type=dataset_type,
         original_filename=file.filename or safe_name,
@@ -172,4 +190,7 @@ async def upload_training_data(
         size_bytes=size_bytes,
         sha256=digest.hexdigest(),
         uploaded_at=uploaded_at,
+        weaviate_enabled=weaviate_result.enabled,
+        weaviate_collection=weaviate_result.collection,
+        weaviate_object_count=weaviate_result.object_count,
     )
