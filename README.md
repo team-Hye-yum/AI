@@ -22,7 +22,7 @@ uvicorn app.main:app --reload
 
 ## 확인
 
-- API: http://localhost:8000
-- Swagger UI: http://localhost:8000/docs
-- Health check: http://localhost:8000/health
+- API: http://localhost:8000/ai
+- Swagger UI: http://localhost:8000/ai/docs
+- Health check: http://localhost:8000/ai/health
 - Deployed health check: https://data-on.site/ai/health
