@@ -14,10 +14,13 @@ services:
       ROOT_PATH: ${ROOT_PATH:-/ai}
       UPLOAD_DIR: ${UPLOAD_DIR:-uploads}
       MAX_UPLOAD_FILE_SIZE_MB: ${MAX_UPLOAD_FILE_SIZE_MB:-100}
+      SEED_TRAINING_DATA_DIR: ${SEED_TRAINING_DATA_DIR:-app/seeds/training-data}
       WEAVIATE_URL: ${WEAVIATE_URL:-http://weaviate:8080}
       WEAVIATE_GRPC_HOST: ${WEAVIATE_GRPC_HOST:-weaviate:50051}
       WEAVIATE_COLLECTION: ${WEAVIATE_COLLECTION:-TrainingDocument}
       WEAVIATE_INGEST_ENABLED: ${WEAVIATE_INGEST_ENABLED:-true}
+      SEED_TRAINING_DATA_ON_STARTUP: ${SEED_TRAINING_DATA_ON_STARTUP:-true}
+      SEED_TRAINING_DATA_STATE_FILE: ${SEED_TRAINING_DATA_STATE_FILE:-.training-data-seed-state.json}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
     volumes:
       - ./uploads:/app/uploads

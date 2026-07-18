@@ -9,6 +9,7 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin
 from urllib.request import Request, urlopen
+from uuid import NAMESPACE_URL, uuid5
 
 from app.core.config import settings
 
@@ -17,6 +18,8 @@ DocumentProperties = dict[str, Any]
 
 BATCH_SIZE = 100
 REQUEST_TIMEOUT_SECONDS = 60
+MAX_CHUNK_CHARS = 6000
+CHUNK_OVERLAP_CHARS = 400
 
 
 @dataclass(frozen=True)
@@ -68,6 +71,67 @@ def ingest_training_file(
     )
 
 
+def count_ingestible_documents(*, dataset_type: str, path: Path) -> int:
+    text = path.read_text(encoding="utf-8-sig")
+    count = 0
+    for chunk in _split_by_dataset_type(dataset_type, text):
+        count += len([piece for piece in _split_large_chunk(chunk) if piece.strip()])
+    return count
+
+
+def count_training_documents(*, dataset_type: str, sha256: str) -> int:
+    query = f"""
+    {{
+      Aggregate {{
+        {settings.weaviate_collection}(
+          where: {{
+            operator: And
+            operands: [
+              {{ path: ["datasetType"], operator: Equal, valueText: {dumps(dataset_type)} }}
+              {{ path: ["sha256"], operator: Equal, valueText: {dumps(sha256)} }}
+            ]
+          }}
+        ) {{
+          meta {{
+            count
+          }}
+        }}
+      }}
+    }}
+    """
+    response = _request("POST", "/v1/graphql", {"query": query})
+    aggregate = response.get("data", {}).get("Aggregate", {})
+    collection = aggregate.get(settings.weaviate_collection, [])
+    if not collection:
+        return 0
+    return int(collection[0].get("meta", {}).get("count", 0))
+
+
+def delete_training_documents(*, dataset_type: str, sha256: str) -> None:
+    payload = {
+        "match": {
+            "class": settings.weaviate_collection,
+            "where": {
+                "operator": "And",
+                "operands": [
+                    {
+                        "path": ["datasetType"],
+                        "operator": "Equal",
+                        "valueText": dataset_type,
+                    },
+                    {
+                        "path": ["sha256"],
+                        "operator": "Equal",
+                        "valueText": sha256,
+                    },
+                ],
+            },
+        },
+        "output": "minimal",
+    }
+    _request("DELETE", "/v1/batch/objects", payload)
+
+
 def _parse_documents(
     *,
     dataset_type: str,
@@ -78,33 +142,61 @@ def _parse_documents(
     sha256: str,
     uploaded_at: datetime,
 ) -> list[DocumentProperties]:
-    chunks = _split_by_dataset_type(dataset_type, text)
     documents = []
 
-    for index, chunk in enumerate(chunks):
-        chunk = chunk.strip()
-        if not chunk:
-            continue
+    for source_chunk in _split_by_dataset_type(dataset_type, text):
+        metadata = _extract_metadata(dataset_type, source_chunk)
+        for chunk in _split_large_chunk(source_chunk):
+            chunk = chunk.strip()
+            if not chunk:
+                continue
 
-        metadata = _extract_metadata(dataset_type, chunk)
-        documents.append(
-            {
-                "datasetType": dataset_type,
-                "sourceFilename": original_filename,
-                "storedFilename": stored_filename,
-                "storedPath": stored_path,
-                "sha256": sha256,
-                "chunkIndex": index,
-                "title": metadata.get("title", ""),
-                "code": metadata.get("code", ""),
-                "name": metadata.get("name", ""),
-                "section": metadata.get("section", ""),
-                "text": chunk,
-                "uploadedAt": uploaded_at.isoformat(),
-            }
-        )
+            documents.append(
+                {
+                    "datasetType": dataset_type,
+                    "sourceFilename": original_filename,
+                    "storedFilename": stored_filename,
+                    "storedPath": stored_path,
+                    "sha256": sha256,
+                    "chunkIndex": len(documents),
+                    "title": metadata.get("title", ""),
+                    "code": metadata.get("code", ""),
+                    "name": metadata.get("name", ""),
+                    "section": metadata.get("section", ""),
+                    "text": chunk,
+                    "uploadedAt": uploaded_at.isoformat(),
+                }
+            )
 
     return documents
+
+
+def _split_large_chunk(chunk: str) -> list[str]:
+    chunk = chunk.strip()
+    if len(chunk) <= MAX_CHUNK_CHARS:
+        return [chunk]
+
+    pieces: list[str] = []
+    start = 0
+    while start < len(chunk):
+        hard_end = min(start + MAX_CHUNK_CHARS, len(chunk))
+        end = hard_end
+        if hard_end < len(chunk):
+            paragraph_end = chunk.rfind("\n\n", start, hard_end)
+            line_end = chunk.rfind("\n", start, hard_end)
+            end = max(paragraph_end, line_end)
+            if end <= start:
+                end = hard_end
+
+        piece = chunk[start:end].strip()
+        if piece:
+            pieces.append(piece)
+
+        if end >= len(chunk):
+            break
+        start = max(end - CHUNK_OVERLAP_CHARS, start + 1)
+
+    return pieces
 
 
 def _split_by_dataset_type(dataset_type: str, text: str) -> list[str]:
@@ -205,7 +297,11 @@ def _ensure_schema() -> None:
 def _batch_insert(documents: list[DocumentProperties]) -> None:
     for start in range(0, len(documents), BATCH_SIZE):
         objects = [
-            {"class": settings.weaviate_collection, "properties": document}
+            {
+                "class": settings.weaviate_collection,
+                "id": _document_id(document),
+                "properties": document,
+            }
             for document in documents[start : start + BATCH_SIZE]
         ]
         response = _request("POST", "/v1/batch/objects", {"objects": objects})
@@ -216,6 +312,18 @@ def _batch_insert(documents: list[DocumentProperties]) -> None:
         ]
         if failed:
             raise WeaviateIngestError(f"weaviate batch insert failed: {failed[:1]}")
+
+
+def _document_id(document: DocumentProperties) -> str:
+    source_key = ":".join(
+        [
+            settings.weaviate_collection,
+            str(document["datasetType"]),
+            str(document["sha256"]),
+            str(document["chunkIndex"]),
+        ]
+    )
+    return str(uuid5(NAMESPACE_URL, source_key))
 
 
 def _request(method: str, path: str, payload: dict[str, Any] | None = None) -> Any:
