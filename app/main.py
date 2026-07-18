@@ -1,5 +1,6 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from threading import Thread
 
 from fastapi import FastAPI
 
@@ -17,7 +18,7 @@ def _api_base_path() -> str:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    seed_training_data_once()
+    Thread(target=seed_training_data_once, daemon=True).start()
     yield
 
 

@@ -11,8 +11,11 @@ class Settings(BaseSettings):
     weaviate_url: str = "http://localhost:8081"
     weaviate_collection: str = "TrainingDocument"
     weaviate_ingest_enabled: bool = True
+    weaviate_request_timeout_seconds: int = 120
     seed_training_data_on_startup: bool = True
     seed_training_data_state_file: str = ".training-data-seed-state.json"
+    seed_training_data_max_attempts: int = 60
+    seed_training_data_retry_delay_seconds: int = 5
     openai_api_key: str = ""
 
     model_config = SettingsConfigDict(

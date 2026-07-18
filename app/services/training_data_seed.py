@@ -21,8 +21,6 @@ from app.services.weaviate_ingest import (
 logger = logging.getLogger(__name__)
 
 DATASET_TYPES = ("equipment", "notice", "ksic")
-MAX_ATTEMPTS = 15
-RETRY_DELAY_SECONDS = 2
 
 
 def get_training_data_seed_status() -> dict[str, Any]:
@@ -96,7 +94,7 @@ def seed_training_data_once() -> None:
     state_path = upload_root / settings.seed_training_data_state_file
     state = _load_state(state_path)
     last_error: WeaviateIngestError | None = None
-    for attempt in range(1, MAX_ATTEMPTS + 1):
+    for attempt in range(1, settings.seed_training_data_max_attempts + 1):
         try:
             pending = _find_pending_files(files, state, state_path, seed_root)
             if not pending:
@@ -106,15 +104,15 @@ def seed_training_data_once() -> None:
             return
         except WeaviateIngestError as exc:
             last_error = exc
-            if attempt == MAX_ATTEMPTS:
+            if attempt == settings.seed_training_data_max_attempts:
                 break
             logger.warning(
                 "Training data seed failed on attempt %s/%s: %s",
                 attempt,
-                MAX_ATTEMPTS,
+                settings.seed_training_data_max_attempts,
                 exc,
             )
-            sleep(RETRY_DELAY_SECONDS)
+            sleep(settings.seed_training_data_retry_delay_seconds)
 
     logger.error("Training data seed failed after retries: %s", last_error)
 

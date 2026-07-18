@@ -5,7 +5,8 @@ services:
       dockerfile: Dockerfile
     container_name: hyeyum-ai
     depends_on:
-      - weaviate
+      weaviate:
+        condition: service_healthy
     ports:
       - "${AI_PORT:-8000}:8000"
     environment:
@@ -19,8 +20,11 @@ services:
       WEAVIATE_GRPC_HOST: ${WEAVIATE_GRPC_HOST:-weaviate:50051}
       WEAVIATE_COLLECTION: ${WEAVIATE_COLLECTION:-TrainingDocument}
       WEAVIATE_INGEST_ENABLED: ${WEAVIATE_INGEST_ENABLED:-true}
+      WEAVIATE_REQUEST_TIMEOUT_SECONDS: ${WEAVIATE_REQUEST_TIMEOUT_SECONDS:-120}
       SEED_TRAINING_DATA_ON_STARTUP: ${SEED_TRAINING_DATA_ON_STARTUP:-true}
       SEED_TRAINING_DATA_STATE_FILE: ${SEED_TRAINING_DATA_STATE_FILE:-.training-data-seed-state.json}
+      SEED_TRAINING_DATA_MAX_ATTEMPTS: ${SEED_TRAINING_DATA_MAX_ATTEMPTS:-60}
+      SEED_TRAINING_DATA_RETRY_DELAY_SECONDS: ${SEED_TRAINING_DATA_RETRY_DELAY_SECONDS:-5}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
     volumes:
       - ./uploads:/app/uploads
@@ -51,6 +55,16 @@ services:
       ENABLE_MODULES: ${WEAVIATE_ENABLE_MODULES:-text2vec-openai}
       DEFAULT_VECTORIZER_MODULE: ${WEAVIATE_DEFAULT_VECTORIZER_MODULE:-text2vec-openai}
       OPENAI_APIKEY: ${OPENAI_API_KEY:-}
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget -q -T 3 -O - http://localhost:8080/v1/.well-known/ready || exit 1",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
     networks:
       - hyeyum-network
     restart: unless-stopped

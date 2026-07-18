@@ -17,7 +17,6 @@ from app.core.config import settings
 DocumentProperties = dict[str, Any]
 
 BATCH_SIZE = 100
-REQUEST_TIMEOUT_SECONDS = 60
 MAX_CHUNK_CHARS = 6000
 CHUNK_OVERLAP_CHARS = 400
 
@@ -99,7 +98,12 @@ def count_training_documents(*, dataset_type: str, sha256: str) -> int:
       }}
     }}
     """
-    response = _request("POST", "/v1/graphql", {"query": query})
+    try:
+        response = _request("POST", "/v1/graphql", {"query": query})
+    except WeaviateIngestError as exc:
+        if _is_missing_schema_error(exc):
+            return 0
+        raise
     aggregate = response.get("data", {}).get("Aggregate", {})
     collection = aggregate.get(settings.weaviate_collection, [])
     if not collection:
@@ -130,6 +134,15 @@ def delete_training_documents(*, dataset_type: str, sha256: str) -> None:
         "output": "minimal",
     }
     _request("DELETE", "/v1/batch/objects", payload)
+
+
+def _is_missing_schema_error(exc: WeaviateIngestError) -> bool:
+    message = str(exc)
+    return (
+        "no graphql provider present" in message
+        or f'Cannot query field "{settings.weaviate_collection}"' in message
+        or "schema" in message and "Import a schema first" in message
+    )
 
 
 def _parse_documents(
@@ -335,7 +348,10 @@ def _request(method: str, path: str, payload: dict[str, Any] | None = None) -> A
 
     request = Request(url, data=body, headers=headers, method=method)
     try:
-        with urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
+        with urlopen(
+            request,
+            timeout=settings.weaviate_request_timeout_seconds,
+        ) as response:
             response_body = response.read()
     except HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")

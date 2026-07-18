@@ -5,11 +5,23 @@ from re import sub
 from typing import Literal
 from uuid import uuid4
 
-from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    UploadFile,
+    status,
+)
 from pydantic import BaseModel
 
 from app.core.config import settings
-from app.services.training_data_seed import get_training_data_seed_status
+from app.services.training_data_seed import (
+    get_training_data_seed_status,
+    seed_training_data_once,
+)
 from app.services.weaviate_ingest import WeaviateIngestError, ingest_training_file
 
 router = APIRouter()
@@ -69,6 +81,11 @@ class TrainingDataSeedStatusResponse(BaseModel):
     state_file: str
     state_file_exists: bool
     files: list[TrainingDataSeedFileStatus]
+
+
+class TrainingDataSeedRunResponse(BaseModel):
+    accepted: bool
+    detail: str
 
 
 def _safe_filename(filename: str) -> str:
@@ -141,6 +158,21 @@ def list_uploaded_training_data(
 )
 def get_training_data_seed_status_response() -> TrainingDataSeedStatusResponse:
     return TrainingDataSeedStatusResponse(**get_training_data_seed_status())
+
+
+@router.post(
+    "/training-data/seed",
+    response_model=TrainingDataSeedRunResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def run_training_data_seed(
+    background_tasks: BackgroundTasks,
+) -> TrainingDataSeedRunResponse:
+    background_tasks.add_task(seed_training_data_once)
+    return TrainingDataSeedRunResponse(
+        accepted=True,
+        detail="training data seed was queued",
+    )
 
 
 @router.post(
