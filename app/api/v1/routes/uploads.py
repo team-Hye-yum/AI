@@ -9,6 +9,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, sta
 from pydantic import BaseModel
 
 from app.core.config import settings
+from app.services.training_data_seed import get_training_data_seed_status
 from app.services.weaviate_ingest import WeaviateIngestError, ingest_training_file
 
 router = APIRouter()
@@ -44,6 +45,30 @@ class UploadedTrainingDataItem(BaseModel):
 class UploadedTrainingDataListResponse(BaseModel):
     total_count: int
     items: list[UploadedTrainingDataItem]
+
+
+class TrainingDataSeedFileStatus(BaseModel):
+    dataset_type: str
+    path: str
+    sha256: str
+    expected_object_count: int
+    weaviate_object_count: int | None
+    weaviate_error: str
+    seeded: bool
+    state_seeded: bool
+    seeded_at: str
+
+
+class TrainingDataSeedStatusResponse(BaseModel):
+    seed_enabled: bool
+    weaviate_ingest_enabled: bool
+    weaviate_collection: str
+    upload_dir: str
+    seed_dir: str
+    seed_dir_exists: bool
+    state_file: str
+    state_file_exists: bool
+    files: list[TrainingDataSeedFileStatus]
 
 
 def _safe_filename(filename: str) -> str:
@@ -108,6 +133,14 @@ def list_uploaded_training_data(
         )
 
     return UploadedTrainingDataListResponse(total_count=len(items), items=items)
+
+
+@router.get(
+    "/training-data/seed-status",
+    response_model=TrainingDataSeedStatusResponse,
+)
+def get_training_data_seed_status_response() -> TrainingDataSeedStatusResponse:
+    return TrainingDataSeedStatusResponse(**get_training_data_seed_status())
 
 
 @router.post(

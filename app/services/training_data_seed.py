@@ -25,6 +25,58 @@ MAX_ATTEMPTS = 15
 RETRY_DELAY_SECONDS = 2
 
 
+def get_training_data_seed_status() -> dict[str, Any]:
+    upload_root = Path(settings.upload_dir)
+    seed_root = Path(settings.seed_training_data_dir)
+    state_path = upload_root / settings.seed_training_data_state_file
+    state = _load_state(state_path)
+
+    files = []
+    for dataset_type, path, digest, expected_count in _find_seed_files(seed_root):
+        state_entry = state.get("files", {}).get(_state_key(dataset_type, path), {})
+        weaviate_count: int | None = None
+        weaviate_error = ""
+        try:
+            weaviate_count = count_training_documents(
+                dataset_type=dataset_type,
+                sha256=digest,
+            )
+        except WeaviateIngestError as exc:
+            weaviate_error = str(exc)
+
+        files.append(
+            {
+                "dataset_type": dataset_type,
+                "path": path.relative_to(seed_root).as_posix(),
+                "sha256": digest,
+                "expected_object_count": expected_count,
+                "weaviate_object_count": weaviate_count,
+                "weaviate_error": weaviate_error,
+                "seeded": weaviate_count == expected_count,
+                "state_seeded": (
+                    isinstance(state_entry, dict)
+                    and state_entry.get("sha256") == digest
+                    and state_entry.get("object_count") == expected_count
+                ),
+                "seeded_at": state_entry.get("seeded_at", "")
+                if isinstance(state_entry, dict)
+                else "",
+            }
+        )
+
+    return {
+        "seed_enabled": settings.seed_training_data_on_startup,
+        "weaviate_ingest_enabled": settings.weaviate_ingest_enabled,
+        "weaviate_collection": settings.weaviate_collection,
+        "upload_dir": upload_root.as_posix(),
+        "seed_dir": seed_root.as_posix(),
+        "seed_dir_exists": seed_root.exists(),
+        "state_file": state_path.as_posix(),
+        "state_file_exists": state_path.exists(),
+        "files": files,
+    }
+
+
 def seed_training_data_once() -> None:
     if not settings.seed_training_data_on_startup:
         logger.info("Training data seed is disabled.")
@@ -75,9 +127,6 @@ def _find_pending_files(
 ) -> list[tuple[str, Path, str]]:
     pending = []
     for dataset_type, path, digest, expected_count in files:
-        if _is_already_seeded(state, dataset_type, path, digest, expected_count):
-            continue
-
         existing_count = count_training_documents(dataset_type=dataset_type, sha256=digest)
         if existing_count == expected_count:
             _mark_seeded(state, seed_root, dataset_type, path, digest, existing_count)
