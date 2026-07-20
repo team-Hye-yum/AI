@@ -4,6 +4,7 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: hyeyum-ai
+    mem_limit: ${AI_MEM_LIMIT:-384m}
     depends_on:
       weaviate:
         condition: service_healthy
@@ -42,6 +43,7 @@ services:
       - http
     image: cr.weaviate.io/semitechnologies/weaviate:1.38.3
     container_name: hyeyum-weaviate
+    mem_limit: ${WEAVIATE_MEM_LIMIT:-512m}
     ports:
       - "${WEAVIATE_PORT:-8081}:8080"
       - "${WEAVIATE_GRPC_PORT:-50051}:50051"
@@ -54,6 +56,7 @@ services:
       CLUSTER_HOSTNAME: node1
       ENABLE_MODULES: ${WEAVIATE_ENABLE_MODULES:-text2vec-openai}
       DEFAULT_VECTORIZER_MODULE: ${WEAVIATE_DEFAULT_VECTORIZER_MODULE:-text2vec-openai}
+      GOMEMLIMIT: ${WEAVIATE_GOMEMLIMIT:-384MiB}
       OPENAI_APIKEY: ${OPENAI_API_KEY:-}
     healthcheck:
       test:
