@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     seed_training_data_state_file: str = ".training-data-seed-state.json"
     seed_training_data_max_attempts: int = 60
     seed_training_data_retry_delay_seconds: int = 5
+    ai_review_cache_path: str = "temp/ai-review-cache.sqlite3"
+    ai_review_cache_ttl_seconds: int = 604800
     openai_api_key: str = ""
 
     model_config = SettingsConfigDict(
