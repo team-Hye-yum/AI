@@ -29,6 +29,8 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5.6}
       OPENAI_TIMEOUT_SECONDS: ${OPENAI_TIMEOUT_SECONDS:-20}
+      AI_ANALYSIS_CACHE_PATH: ${AI_ANALYSIS_CACHE_PATH:-temp/company-ai-analysis-cache.sqlite3}
+      AI_ANALYSIS_CACHE_TTL_SECONDS: ${AI_ANALYSIS_CACHE_TTL_SECONDS:-604800}
     volumes:
       - ./uploads:/app/uploads
     networks:

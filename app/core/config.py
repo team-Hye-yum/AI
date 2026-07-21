@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     seed_training_data_retry_delay_seconds: int = 5
     ai_review_cache_path: str = "temp/ai-review-cache.sqlite3"
     ai_review_cache_ttl_seconds: int = 604800
+    ai_analysis_cache_path: str = "temp/company-ai-analysis-cache.sqlite3"
+    ai_analysis_cache_ttl_seconds: int = 604800
     openai_api_key: str = ""
     openai_model: str = "gpt-5.6"
     openai_timeout_seconds: float = 20.0
