@@ -7,7 +7,7 @@ from typing import Any
 from app.core.config import settings
 
 
-MODEL_VERSION = "company-ai-analysis-v1"
+MODEL_VERSION = "company-ai-analysis-v2"
 PROMPT_PATH = Path(__file__).resolve().parents[1] / "prompts" / "ai_analysis.txt"
 ANALYSIS_TYPES = ["IDENTITY", "PERFORMANCE", "EMPLOYMENT_SUPPORT"]
 FORBIDDEN_TERMS = [
@@ -61,6 +61,9 @@ def _validated_response(output_text: str) -> dict[str, Any] | None:
     raw_lines = parsed.get("analysisLines")
     if not isinstance(raw_lines, list) or len(raw_lines) != 3:
         return None
+    analysis_markdown = parsed.get("analysisMarkdown")
+    if not isinstance(analysis_markdown, str) or not analysis_markdown.strip():
+        return None
 
     analysis_lines: list[dict[str, str]] = []
     for expected_type, item in zip(ANALYSIS_TYPES, raw_lines, strict=True):
@@ -74,7 +77,11 @@ def _validated_response(output_text: str) -> dict[str, Any] | None:
             return None
         analysis_lines.append({"type": expected_type, "line": line})
 
-    return _response(analysis_lines)
+    analysis_markdown = _clean_markdown(analysis_markdown)
+    if not analysis_markdown or any(term in analysis_markdown for term in FORBIDDEN_TERMS):
+        return None
+
+    return _response(analysis_lines, analysis_markdown)
 
 
 def _fallback_response(payload: dict[str, Any]) -> dict[str, Any]:
@@ -122,26 +129,40 @@ def _fallback_response(payload: dict[str, Any]) -> dict[str, Any]:
         employment_parts.append(f"회전율 {turnover_rate:.1f}%")
     employment_suffix = ", ".join(employment_parts) if employment_parts else "연도별 고용 규모"
 
-    return _response(
+    analysis_lines = [
+        {
+            "type": "IDENTITY",
+            "line": f"{industry_name} 기반 기업으로, {identity_suffix}을 함께 보며 실제 활동 영역을 먼저 파악하는 것이 좋습니다.",
+        },
+        {
+            "type": "PERFORMANCE",
+            "line": f"{performance_suffix}을 나란히 비교해 지원 이후 성과 흐름을 확인하는 것이 적절합니다.",
+        },
+        {
+            "type": "EMPLOYMENT_SUPPORT",
+            "line": f"{employment_suffix}은 단독 해석보다 지원 시점과 함께 확인해 고용 흐름을 보는 것이 좋습니다.",
+        },
+    ]
+    analysis_markdown = "\n\n".join(
         [
-            {
-                "type": "IDENTITY",
-                "line": f"{industry_name} 기반 기업으로, {identity_suffix}을 함께 보며 실제 활동 영역을 먼저 파악하는 것이 좋습니다.",
-            },
-            {
-                "type": "PERFORMANCE",
-                "line": f"{performance_suffix}을 나란히 비교해 지원 이후 성과 흐름을 확인하는 것이 적절합니다.",
-            },
-            {
-                "type": "EMPLOYMENT_SUPPORT",
-                "line": f"{employment_suffix}은 단독 해석보다 지원 시점과 함께 확인해 고용 흐름을 보는 것이 좋습니다.",
-            },
+            "## 기업 개요",
+            f"- **{industry_name}** 기반 기업으로, {identity_suffix}을 함께 보며 실제 활동 영역을 먼저 파악하는 것이 좋습니다.",
+            "## 성과 흐름",
+            f"- **{performance_suffix}**을 나란히 비교해 지원 이후 성과 흐름을 확인하는 것이 적절합니다.",
+            "## 우선 확인할 지표",
+            "- **매출액, 영업이익률, 부채비율**은 성장성과 재무 부담을 함께 보는 기본 지표로 활용할 수 있습니다.",
+            f"- **{employment_suffix}**은 지원 시점과 함께 확인해 고용 흐름을 보는 것이 좋습니다.",
+            "- **R&D 비용, NTIS, 특허·인증, 지원 이력**은 기술 활동과 사업화 흐름을 연결해 보는 참고 항목입니다.",
+            "## 참고 한계",
+            "- 본 리포트는 입력된 대시보드 데이터를 해석하기 위한 참고자료이며, 평가 결과나 지원 여부를 제시하지 않습니다.",
         ]
     )
+    return _response(analysis_lines, analysis_markdown)
 
 
-def _response(analysis_lines: list[dict[str, str]]) -> dict[str, Any]:
+def _response(analysis_lines: list[dict[str, str]], analysis_markdown: str) -> dict[str, Any]:
     return {
+        "analysisMarkdown": analysis_markdown,
         "analysisLines": analysis_lines,
         "meta": {
             "cached": False,
@@ -152,6 +173,13 @@ def _response(analysis_lines: list[dict[str, str]]) -> dict[str, Any]:
 
 def _clean_line(value: str, max_length: int = 180) -> str:
     return _short(" ".join(value.split()), max_length)
+
+
+def _clean_markdown(value: str, max_length: int = 2200) -> str:
+    text = value.strip()
+    if len(text) <= max_length:
+        return text
+    return text[:max_length].rstrip()
 
 
 def _first_text(values: Any) -> str | None:

@@ -95,6 +95,7 @@ class AiAnalysisMeta(BaseModel):
 
 
 class AiAnalysisResponse(BaseModel):
+    analysisMarkdown: str
     analysisLines: list[AnalysisLine]
     meta: AiAnalysisMeta
 
