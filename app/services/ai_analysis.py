@@ -7,7 +7,7 @@ from typing import Any
 from app.core.config import settings
 
 
-MODEL_VERSION = "company-ai-analysis-v2"
+MODEL_VERSION = "company-ai-analysis-v3"
 PROMPT_PATH = Path(__file__).resolve().parents[1] / "prompts" / "ai_analysis.txt"
 ANALYSIS_TYPES = ["IDENTITY", "PERFORMANCE", "EMPLOYMENT_SUPPORT"]
 FORBIDDEN_TERMS = [
@@ -101,6 +101,12 @@ def _fallback_response(payload: dict[str, Any]) -> dict[str, Any]:
     latest_sales_amount = _as_int(financials.get("latestSalesAmount"))
     retiree_count = _as_int(employment.get("pensionRetireeCount"))
     turnover_rate = _as_float(employment.get("employeeTurnoverRate"))
+    supported_sales_growth_rate = _as_float(financials.get("supportedSalesGrowthRate"))
+    debt_ratio = _as_float(financials.get("debtRatio"))
+    government_rnd_dependency = _as_float(financials.get("governmentRndDependency"))
+    latest_rnd_expense = _as_int(financials.get("latestRndExpense"))
+    previous_employee_count = _as_int(employment.get("employeeCountPreviousYear"))
+    observation_employee_count = _as_int(employment.get("employeeCountObservationYear"))
 
     identity_evidence = []
     if business_purpose:
@@ -110,6 +116,20 @@ def _fallback_response(payload: dict[str, Any]) -> dict[str, Any]:
     if patent_count:
         identity_evidence.append(f"등록특허 {patent_count}건")
     identity_suffix = "와 ".join(identity_evidence[:2]) if identity_evidence else "사업목적과 기술 이력"
+
+    priority_metrics = _priority_metrics(
+        sales_growth_rate=sales_growth_rate,
+        supported_sales_growth_rate=supported_sales_growth_rate,
+        debt_ratio=debt_ratio,
+        government_rnd_dependency=government_rnd_dependency,
+        latest_rnd_expense=latest_rnd_expense,
+        previous_employee_count=previous_employee_count,
+        observation_employee_count=observation_employee_count,
+        turnover_rate=turnover_rate,
+        ntis_count=ntis_count,
+        patent_count=patent_count,
+        recent_support_count=recent_support_count,
+    )
 
     performance_parts = []
     if recent_support_count:
@@ -128,6 +148,9 @@ def _fallback_response(payload: dict[str, Any]) -> dict[str, Any]:
     if turnover_rate is not None:
         employment_parts.append(f"회전율 {turnover_rate:.1f}%")
     employment_suffix = ", ".join(employment_parts) if employment_parts else "연도별 고용 규모"
+    first_metric = priority_metrics[0] if priority_metrics else "지원 이력과 성과 흐름"
+    second_metric = priority_metrics[1] if len(priority_metrics) > 1 else performance_suffix
+    third_metric = priority_metrics[2] if len(priority_metrics) > 2 else employment_suffix
 
     analysis_lines = [
         {
@@ -136,11 +159,11 @@ def _fallback_response(payload: dict[str, Any]) -> dict[str, Any]:
         },
         {
             "type": "PERFORMANCE",
-            "line": f"{performance_suffix}을 나란히 비교해 지원 이후 성과 흐름을 확인하는 것이 적절합니다.",
+            "line": f"{first_metric}을 중심으로 지원 이력과 성과 흐름을 연결해 보는 것이 적절합니다.",
         },
         {
             "type": "EMPLOYMENT_SUPPORT",
-            "line": f"{employment_suffix}은 단독 해석보다 지원 시점과 함께 확인해 고용 흐름을 보는 것이 좋습니다.",
+            "line": f"{second_metric}은 단독 해석보다 지원 시점과 함께 확인해 흐름을 보는 것이 좋습니다.",
         },
     ]
     analysis_markdown = "\n\n".join(
@@ -148,12 +171,12 @@ def _fallback_response(payload: dict[str, Any]) -> dict[str, Any]:
             "## 기업 개요",
             f"- **{industry_name}** 기반 기업으로, {identity_suffix}을 함께 보며 실제 활동 영역을 먼저 파악하는 것이 좋습니다.",
             "## 성과 흐름",
-            f"- **{performance_suffix}**을 나란히 비교해 지원 이후 성과 흐름을 확인하는 것이 적절합니다.",
+            f"- **{first_metric}**이 가장 먼저 볼 지표로 보이며, 지원 이력과 같은 시점에 놓고 흐름을 확인하는 것이 적절합니다.",
+            f"- 다음으로는 **{second_metric}**을 함께 보면 단순 규모보다 변화의 방향을 더 분명하게 읽을 수 있습니다.",
             "## 우선 확인할 지표",
-            "- **매출액, 영업이익률, 부채비율**은 성장성과 재무 부담을 함께 보는 기본 지표로 활용할 수 있습니다.",
-            f"- **{employment_suffix}**은 지원 시점과 함께 확인해 고용 흐름을 보는 것이 좋습니다.",
-            "- **R&D 비용, NTIS, 특허·인증, 지원 이력**은 기술 활동과 사업화 흐름을 연결해 보는 참고 항목입니다.",
-            "## 참고 한계",
+            f"- **{first_metric}**은 이 기업 대시보드에서 우선 확인할 값으로 정리됩니다.",
+            f"- **{third_metric}**은 앞선 지표를 보완해 활동 역량 또는 사업화 흐름을 확인하는 보조 항목으로 볼 수 있습니다.",
+            "## 참고 사항",
             "- 본 리포트는 입력된 대시보드 데이터를 해석하기 위한 참고자료이며, 평가 결과나 지원 여부를 제시하지 않습니다.",
         ]
     )
@@ -180,6 +203,52 @@ def _clean_markdown(value: str, max_length: int = 2200) -> str:
     if len(text) <= max_length:
         return text
     return text[:max_length].rstrip()
+
+
+def _priority_metrics(
+    *,
+    sales_growth_rate: float | None,
+    supported_sales_growth_rate: float | None,
+    debt_ratio: float | None,
+    government_rnd_dependency: float | None,
+    latest_rnd_expense: int | None,
+    previous_employee_count: int | None,
+    observation_employee_count: int | None,
+    turnover_rate: float | None,
+    ntis_count: int,
+    patent_count: int,
+    recent_support_count: int,
+) -> list[str]:
+    candidates: list[tuple[float, str]] = []
+    if debt_ratio is not None:
+        candidates.append((abs(debt_ratio) + (80 if debt_ratio >= 100 else 0), f"부채비율 {debt_ratio:.1f}%"))
+    if sales_growth_rate is not None:
+        candidates.append((abs(sales_growth_rate) + 40, f"매출 성장률 {sales_growth_rate:.1f}%"))
+    if supported_sales_growth_rate is not None:
+        candidates.append((abs(supported_sales_growth_rate) + 35, f"지원 후 매출 성장률 {supported_sales_growth_rate:.1f}%"))
+    if government_rnd_dependency is not None:
+        candidates.append((abs(government_rnd_dependency) + 20, f"정부 R&D 의존도 {government_rnd_dependency:.1f}%"))
+    if turnover_rate is not None:
+        candidates.append((abs(turnover_rate) + 15, f"고용 회전율 {turnover_rate:.1f}%"))
+    employee_change = _employee_change_rate(previous_employee_count, observation_employee_count)
+    if employee_change is not None:
+        candidates.append((abs(employee_change) + 25, f"종사자수 변화율 {employee_change:.1f}%"))
+    if latest_rnd_expense is not None and latest_rnd_expense > 0:
+        candidates.append((30, "최근 R&D 비용"))
+    if recent_support_count:
+        candidates.append((recent_support_count * 8, f"지원 이력 {recent_support_count}건"))
+    if ntis_count:
+        candidates.append((ntis_count * 6, f"NTIS 과제 {ntis_count}건"))
+    if patent_count:
+        candidates.append((patent_count * 5, f"등록특허 {patent_count}건"))
+
+    return [label for _, label in sorted(candidates, key=lambda item: item[0], reverse=True)[:3]]
+
+
+def _employee_change_rate(previous: int | None, current: int | None) -> float | None:
+    if previous is None or current is None or previous == 0:
+        return None
+    return (current - previous) * 100 / previous
 
 
 def _first_text(values: Any) -> str | None:
