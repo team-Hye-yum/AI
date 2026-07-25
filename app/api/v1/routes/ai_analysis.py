@@ -52,6 +52,24 @@ class Financials(BaseModel):
     latestRndExpense: int | None = None
 
 
+class IndustryGrowthPoint(BaseModel):
+    year: int | None = None
+    companyIndex: float | None = None
+    industryIndex: float | None = None
+    companyGrowthRate: float | None = None
+    industryGrowthRate: float | None = None
+
+
+class IndustryComparison(BaseModel):
+    baseYear: int | None = None
+    latestYear: int | None = None
+    companyChangeRate: float | None = None
+    industryChangeRate: float | None = None
+    gapRate: float | None = None
+    points: list[IndustryGrowthPoint] = Field(default_factory=list)
+    summary: str | None = None
+
+
 class Employment(BaseModel):
     observationYear: int | None = None
     employeeCountPreviousYear: int | None = None
@@ -79,6 +97,7 @@ class AiAnalysisRequest(BaseModel):
     profile: Profile | None = None
     capabilities: Capabilities | None = None
     financials: Financials | None = None
+    industryComparison: IndustryComparison | None = None
     employment: Employment | None = None
     supportHistory: SupportHistory | None = None
     options: Options | None = None

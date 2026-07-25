@@ -7,7 +7,7 @@ from typing import Any
 from app.core.config import settings
 
 
-MODEL_VERSION = "company-ai-analysis-v3"
+MODEL_VERSION = "company-ai-analysis-v4"
 PROMPT_PATH = Path(__file__).resolve().parents[1] / "prompts" / "ai_analysis.txt"
 ANALYSIS_TYPES = ["IDENTITY", "PERFORMANCE", "EMPLOYMENT_SUPPORT"]
 FORBIDDEN_TERMS = [
@@ -88,6 +88,7 @@ def _fallback_response(payload: dict[str, Any]) -> dict[str, Any]:
     profile = payload.get("profile") or {}
     capabilities = payload.get("capabilities") or {}
     financials = payload.get("financials") or {}
+    industry_comparison = payload.get("industryComparison") or {}
     employment = payload.get("employment") or {}
     support = payload.get("supportHistory") or {}
 
@@ -107,6 +108,10 @@ def _fallback_response(payload: dict[str, Any]) -> dict[str, Any]:
     latest_rnd_expense = _as_int(financials.get("latestRndExpense"))
     previous_employee_count = _as_int(employment.get("employeeCountPreviousYear"))
     observation_employee_count = _as_int(employment.get("employeeCountObservationYear"))
+    industry_summary = _industry_comparison_summary(industry_comparison)
+    industry_gap_rate = _as_float(industry_comparison.get("gapRate"))
+    company_industry_change_rate = _as_float(industry_comparison.get("companyChangeRate"))
+    industry_change_rate = _as_float(industry_comparison.get("industryChangeRate"))
 
     identity_evidence = []
     if business_purpose:
@@ -129,6 +134,9 @@ def _fallback_response(payload: dict[str, Any]) -> dict[str, Any]:
         ntis_count=ntis_count,
         patent_count=patent_count,
         recent_support_count=recent_support_count,
+        industry_gap_rate=industry_gap_rate,
+        company_industry_change_rate=company_industry_change_rate,
+        industry_change_rate=industry_change_rate,
     )
 
     performance_parts = []
@@ -159,7 +167,7 @@ def _fallback_response(payload: dict[str, Any]) -> dict[str, Any]:
         },
         {
             "type": "PERFORMANCE",
-            "line": f"{first_metric}을 중심으로 지원 이력과 성과 흐름을 연결해 보는 것이 적절합니다.",
+            "line": f"{industry_summary} {first_metric}을 함께 보며 지원 이력과 성과 흐름을 연결해 보는 것이 적절합니다.",
         },
         {
             "type": "EMPLOYMENT_SUPPORT",
@@ -170,6 +178,8 @@ def _fallback_response(payload: dict[str, Any]) -> dict[str, Any]:
         [
             "## 기업 개요",
             f"- **{industry_name}** 기반 기업으로, {identity_suffix}을 함께 보며 실제 활동 영역을 먼저 파악하는 것이 좋습니다.",
+            "## 산업 대비 흐름",
+            f"- {industry_summary}",
             "## 성과 흐름",
             f"- **{first_metric}**이 가장 먼저 볼 지표로 보이며, 지원 이력과 같은 시점에 놓고 흐름을 확인하는 것이 적절합니다.",
             f"- 다음으로는 **{second_metric}**을 함께 보면 단순 규모보다 변화의 방향을 더 분명하게 읽을 수 있습니다.",
@@ -218,8 +228,18 @@ def _priority_metrics(
     ntis_count: int,
     patent_count: int,
     recent_support_count: int,
+    industry_gap_rate: float | None,
+    company_industry_change_rate: float | None,
+    industry_change_rate: float | None,
 ) -> list[str]:
     candidates: list[tuple[float, str]] = []
+    if industry_gap_rate is not None:
+        candidates.append((abs(industry_gap_rate) + 90, f"산업 대비 매출 격차 {industry_gap_rate:+.1f}%p"))
+    if company_industry_change_rate is not None and industry_change_rate is not None:
+        candidates.append((
+            abs(company_industry_change_rate - industry_change_rate) + 60,
+            f"기업 {company_industry_change_rate:+.1f}%·산업 {industry_change_rate:+.1f}% 흐름",
+        ))
     if debt_ratio is not None:
         candidates.append((abs(debt_ratio) + (80 if debt_ratio >= 100 else 0), f"부채비율 {debt_ratio:.1f}%"))
     if sales_growth_rate is not None:
@@ -243,6 +263,30 @@ def _priority_metrics(
         candidates.append((patent_count * 5, f"등록특허 {patent_count}건"))
 
     return [label for _, label in sorted(candidates, key=lambda item: item[0], reverse=True)[:3]]
+
+
+def _industry_comparison_summary(industry_comparison: dict[str, Any]) -> str:
+    provided_summary = industry_comparison.get("summary")
+    if isinstance(provided_summary, str) and provided_summary.strip():
+        return provided_summary.strip()
+
+    company_change = _as_float(industry_comparison.get("companyChangeRate"))
+    industry_change = _as_float(industry_comparison.get("industryChangeRate"))
+    gap = _as_float(industry_comparison.get("gapRate"))
+    base_year = _as_int(industry_comparison.get("baseYear")) or 2021
+    latest_year = _as_int(industry_comparison.get("latestYear")) or 2024
+    if company_change is None or industry_change is None or gap is None:
+        return "산업 대비 매출 흐름은 비교 데이터가 제한적이므로 기업 내부 지표 중심으로 확인하는 것이 좋습니다."
+    period = f"{base_year}~{latest_year}년"
+    if industry_change <= -15 and gap >= 10:
+        return f"{period} 산업은 {industry_change:+.1f}% 흐름이었지만 기업은 {company_change:+.1f}%로 상대적으로 방어한 구간입니다."
+    if industry_change >= 15 and gap <= -10:
+        return f"{period} 산업은 {industry_change:+.1f}% 확장됐지만 기업은 {company_change:+.1f}%에 그쳐 시장 흐름을 따라갔는지 확인할 수 있습니다."
+    if gap >= 10:
+        return f"{period} 기업 흐름이 산업보다 {gap:+.1f}%p 높아 기업 고유 성장 요인을 먼저 볼 수 있습니다."
+    if gap <= -10:
+        return f"{period} 기업 흐름이 산업보다 {abs(gap):.1f}%p 낮아 업종 환경과 내부 성과를 나누어 볼 수 있습니다."
+    return f"{period} 기업과 산업 흐름의 격차가 {gap:+.1f}%p로 크지 않아 재무·고용·기술 지표를 함께 봐야 합니다."
 
 
 def _employee_change_rate(previous: int | None, current: int | None) -> float | None:
